@@ -7,6 +7,8 @@ import (
 	"io"
 	"strings"
 	"unicode"
+
+	"github.com/P-H-Pancholi/httpfromtcp/internal/headers"
 )
 
 type State int64
@@ -15,11 +17,13 @@ const bufferSize = 8
 
 const (
 	Initialized State = iota
+	parseHeaders
 	Done
 )
 
 type Request struct {
 	RequestLine RequestLine
+	Headers     headers.Headers
 	State       State
 }
 
@@ -34,7 +38,8 @@ func RequestFromReader(reader io.Reader) (*Request, error) {
 
 	readToIndex := 0
 	r := &Request{
-		State: Initialized,
+		State:   Initialized,
+		Headers: make(headers.Headers),
 	}
 
 	for r.State != Done {
@@ -61,7 +66,7 @@ func RequestFromReader(reader io.Reader) (*Request, error) {
 			return nil, err
 		}
 
-		copy(buf, buf[bytesRead:readToIndex])
+		copy(buf, buf[bytesRead:])
 		readToIndex -= bytesRead
 	}
 	return r, nil
@@ -98,10 +103,26 @@ func parseRequestLine(data []byte) (*RequestLine, int, error) {
 	}
 	r.HttpVersion = httpVersion[1]
 
-	return &r, len(data), nil
+	return &r, idx + 2, nil
 }
 
 func (r *Request) parse(data []byte) (int, error) {
+	numOfBytesParsed := 0
+	for r.State != Done {
+		n, err := r.parseSingle(data[numOfBytesParsed:])
+		if err != nil {
+			return 0, err
+		}
+		numOfBytesParsed += n
+		if n == 0 {
+			break
+		}
+
+	}
+	return numOfBytesParsed, nil
+}
+
+func (r *Request) parseSingle(data []byte) (int, error) {
 	switch r.State {
 	case Initialized:
 		reqLine, n, err := parseRequestLine(data)
@@ -115,7 +136,16 @@ func (r *Request) parse(data []byte) (int, error) {
 		}
 
 		r.RequestLine = *reqLine
-		r.State = Done
+		r.State = parseHeaders
+		return n, nil
+	case parseHeaders:
+		n, done, err := r.Headers.Parse(data)
+		if err != nil {
+			return 0, err
+		}
+		if done {
+			r.State = Done
+		}
 		return n, nil
 	case Done:
 		return 0, fmt.Errorf("error: trying to read data in done state")
