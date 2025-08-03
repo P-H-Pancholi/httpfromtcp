@@ -44,6 +44,8 @@ func main() {
 	for key, value := range r.Headers {
 		fmt.Printf("- %s: %s\n", key, value)
 	}
+	fmt.Println("Body:")
+	fmt.Printf("%s\n", string(r.Body))
 }
 
 // func getLinesChannel(f io.ReadCloser) <-chan string {

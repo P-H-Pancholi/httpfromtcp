@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 	"unicode"
 
@@ -18,6 +19,7 @@ const bufferSize = 8
 const (
 	Initialized State = iota
 	parseHeaders
+	parseBody
 	Done
 )
 
@@ -25,6 +27,7 @@ type Request struct {
 	RequestLine RequestLine
 	Headers     headers.Headers
 	State       State
+	Body        []byte
 }
 
 type RequestLine struct {
@@ -53,7 +56,9 @@ func RequestFromReader(reader io.Reader) (*Request, error) {
 		n, err := reader.Read(buf[readToIndex:])
 		if err != nil {
 			if errors.Is(err, io.EOF) {
-				r.State = Done
+				if r.State != Done {
+					return nil, fmt.Errorf("error: malformed request")
+				}
 				break
 			}
 			return nil, err
@@ -144,9 +149,27 @@ func (r *Request) parseSingle(data []byte) (int, error) {
 			return 0, err
 		}
 		if done {
-			r.State = Done
+			r.State = parseBody
 		}
 		return n, nil
+	case parseBody:
+		s, exists := r.Headers.Get("Content-Length")
+		if !exists {
+			r.State = Done
+			return 0, nil
+		}
+		r.Body = append(r.Body, data...)
+		n, err := strconv.Atoi(s)
+		if err != nil {
+			return 0, err
+		}
+		if len(r.Body) > n {
+			return 0, fmt.Errorf("error: body length greater than content-length")
+		}
+		if len(r.Body) == n {
+			r.State = Done
+		}
+		return len(data), nil
 	case Done:
 		return 0, fmt.Errorf("error: trying to read data in done state")
 	default:
