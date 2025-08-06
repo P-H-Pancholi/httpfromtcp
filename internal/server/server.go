@@ -1,9 +1,7 @@
 package server
 
 import (
-	"bytes"
 	"fmt"
-	"io"
 	"log"
 	"net"
 	"sync/atomic"
@@ -25,21 +23,21 @@ type HandlerError struct {
 	Message    string
 }
 
-type Handler func(w io.Writer, req *request.Request) *HandlerError
+type Handler func(w response.Writer, req *request.Request)
 
-func writeError(w io.Writer, handlerErr *HandlerError) {
-	h := response.GetDefaultHeaders(len(handlerErr.Message))
-	if err := response.WriteStatusLine(w, response.StatusCode(handlerErr.StatusCode)); err != nil {
-		log.Printf("Error while writing status line: %v", err)
-		return
-	}
-	if err := response.WriteHeaders(w, h); err != nil {
-		log.Printf("Error while writing headers line: %v", err)
-		return
-	}
-	w.Write([]byte(handlerErr.Message))
+// func writeError(w io.Writer, handlerErr *HandlerError) {
+// 	h := response.GetDefaultHeaders(len(handlerErr.Message))
+// 	if err := response.WriteStatusLine(w, response.StatusCode(handlerErr.StatusCode)); err != nil {
+// 		log.Printf("Error while writing status line: %v", err)
+// 		return
+// 	}
+// 	if err := response.WriteHeaders(w, h); err != nil {
+// 		log.Printf("Error while writing headers line: %v", err)
+// 		return
+// 	}
+// 	w.Write([]byte(handlerErr.Message))
 
-}
+// }
 
 func Serve(port int, handlerfunc Handler) (*Server, error) {
 	list, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
@@ -88,24 +86,7 @@ func (s *Server) handler(conn net.Conn) {
 	if err != nil {
 		log.Printf("Error while parsing request from connection: %v", err)
 	}
-	buf := bytes.Buffer{}
-	HandlerErr := s.handlerfunc(&buf, r)
-	if HandlerErr != nil {
-		writeError(conn, HandlerErr)
-		return
-	}
-
-	h := response.GetDefaultHeaders(buf.Len())
-	if err := response.WriteStatusLine(conn, 200); err != nil {
-		log.Printf("Error while writing status line: %v", err)
-		return
-	}
-	if err := response.WriteHeaders(conn, h); err != nil {
-		log.Printf("Error while writing headers line: %v", err)
-		return
-	}
-
-	// write response body
-	conn.Write(buf.Bytes())
+	w := response.NewWriter(conn)
+	s.handlerfunc(w, r)
 
 }
