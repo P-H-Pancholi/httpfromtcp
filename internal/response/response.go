@@ -63,30 +63,17 @@ func (w *Writer) WriteHeaders(h headers.Headers) error {
 	if w.state != statusLineState {
 		return errors.New("improper sequence")
 	}
-	s := ""
 
-	contentLen, ok := h.Get("Content-length")
-	if !ok {
-		return errors.New("content-length does not exists in headers")
+	// Write ALL headers, not just specific ones
+	for key, value := range h {
+		s := fmt.Sprintf("%s: %s\r\n", key, value)
+		writer := *w.data
+		writer.Write([]byte(s))
 	}
-	s += fmt.Sprintf("Content-Length: %s\r\n", contentLen)
 
-	con, ok := h.Get("Connection")
-	if !ok {
-		return errors.New("connection does not exists in headers")
-	}
-	s += fmt.Sprintf("Connection: %s\r\n", con)
-
-	conType, ok := h.Get("Content-Type")
-	if !ok {
-		return errors.New("content-Type does not exists in headers")
-	}
-	s += fmt.Sprintf("Content-Type: %s\r\n", conType)
-
-	s += "\r\n"
-
+	// End headers section
 	writer := *w.data
-	writer.Write([]byte(s))
+	writer.Write([]byte("\r\n"))
 	w.state = headerState
 	return nil
 }
@@ -98,6 +85,41 @@ func (w *Writer) WriteBody(p []byte) (int, error) {
 	writer := *w.data
 	writer.Write(p)
 	return len(p), nil
+}
+
+func (w *Writer) WriteChunkedBody(p []byte) (int, error) {
+	if w.state != headerState {
+		return 0, errors.New("improper sequence")
+	}
+	wr := *w.data
+	s := fmt.Sprintf("%x\r\n", len(p))
+	wr.Write([]byte(s))
+	wr.Write(p)
+	wr.Write([]byte("\r\n"))
+	return len(p), nil
+}
+
+func (w *Writer) WriteChunkedBodyDone() (int, error) {
+	if w.state != headerState {
+		return 0, errors.New("improper sequence")
+	}
+	wr := *w.data
+	wr.Write([]byte("0\r\n"))
+	return 0, nil
+}
+
+func (w *Writer) WriteTrailers(h headers.Headers) error {
+
+	s := ""
+	xSHA, _ := h.Get("X-Content-Sha256")
+	s += fmt.Sprintf("X-Content-Sha256: %s\r\n", xSHA)
+	xContLen, _ := h.Get("X-Content-Length")
+	s += fmt.Sprintf("X-Content-Length: %s\r\n", xContLen)
+
+	s += "\r\n"
+	wr := *w.data
+	wr.Write([]byte(s))
+	return nil
 }
 
 // func WriteStatusLine(w io.Writer, statusCode StatusCode) error {
@@ -115,13 +137,13 @@ func (w *Writer) WriteBody(p []byte) (int, error) {
 // 	return nil
 // }
 
-// func GetDefaultHeaders(contentLen int) headers.Headers {
-// 	h := headers.Headers{}
-// 	h["content-length"] = strconv.Itoa(contentLen)
-// 	h["connection"] = "close"
-// 	h["content-type"] = "text/plain"
-// 	return h
-// }
+func GetDefaultHeaders(contentLen int) headers.Headers {
+	h := headers.Headers{}
+	h["content-length"] = strconv.Itoa(contentLen)
+	h["connection"] = "close"
+	h["content-type"] = "text/plain"
+	return h
+}
 
 // func WriteHeaders(w io.Writer, headers headers.Headers) error {
 // 	s := ""
